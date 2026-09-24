@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Cipher — Password Manager",
+  "version": "1.0.0",
+  "description": "Autofill credentials from your Cipher vault. Zero-knowledge, local-first.",
+  "author": "ISSEI",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "cipher-password-manager@local",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuCBQXzIltk7YHzkZb2yYxs2BrtC/9CyTeFQEoeU9Udrwcri5KBdaT6e6SK93ISrKhVKTDAtniz+IyT0Xj4swGUX84HXU0ikxSTctL22BPqU7WcMGWRJ1SXTIe+lGve3Sqp7MuC8YlT6SxaKZcnAAlQwjKUp3BKxBou72gldDH7BsKuhhPKMwj50WW0ru7Q96MxMQm4CPYx6RhqsyNmww9Ehp1DdGpb0G+ElJkr6wurm4y0y1G4v82HMGJASNyhN0chCgcfo4GIkwGZv210DdCaYI0P5PfNexRPVsMk4n0NLsa2MafbMohcEyD/bk7XtFNZKDGDjF04a1jjds+rZL3wIDAQAB",
+  "permissions": [
+    "nativeMessaging",
+    "activeTab",
+    "clipboardWrite",
+    "storage"
+  ],
+  "icons": {
+    "16": "icons/cipher-16.png",
+    "32": "icons/cipher-32.png",
+    "48": "icons/cipher-48.png",
+    "128": "icons/cipher-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/cipher-16.png",
+      "32": "icons/cipher-32.png"
+    },
+    "default_popup": "popup/popup.html",
+    "default_title": "Cipher"
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/autofill.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

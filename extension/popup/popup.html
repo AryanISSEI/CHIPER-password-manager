@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cipher</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Top App Bar -->
+    <header class="app-header">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 48 48">
+          <path d="M24 4 L44 24 L24 44 L4 24 Z" fill="url(#brand-grad)" />
+          <defs>
+            <linearGradient id="brand-grad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#3D8FFF"/>
+              <stop offset="1" stop-color="#1A6FE8"/>
+            </linearGradient>
+          </defs>
+          <rect x="18" y="21" width="12" height="9" rx="2" fill="#0B0C0E"/>
+          <path d="M20 21 V18 A4 4 0 0 1 28 18 V21" fill="none" stroke="#0B0C0E" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">Cipher</span>
+      </div>
+      <div class="header-actions">
+        <span id="connection-badge" class="badge-dot" title="Desktop App Status"></span>
+        <button id="btn-add-credential" class="icon-btn" title="Add Credential" style="display: none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+        <button id="btn-generator-toggle" class="icon-btn" title="Password Generator">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </button>
+        <button id="btn-lock" class="icon-btn" title="Lock Vault" style="display: none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ── Locked View ── -->
+    <div id="locked-view" class="view">
+      <div class="locked-card">
+        <div class="lock-illustration">
+          <div class="lock-glow"></div>
+          <svg class="lock-big-icon" viewBox="0 0 48 48">
+            <path d="M24 4 L44 24 L24 44 L4 24 Z" fill="#181B1F" stroke="#252930" stroke-width="2"/>
+            <rect x="18" y="21" width="12" height="9" rx="2" fill="#2D7FF9"/>
+            <path d="M20 21 V18 A4 4 0 0 1 28 18 V21" fill="none" stroke="#2D7FF9" stroke-width="2.2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h2>Unlock Vault</h2>
+        <p class="subtitle">Enter your master password to access credentials</p>
+
+        <form id="unlock-form">
+          <div class="input-wrap">
+            <input type="password" id="unlock-password" placeholder="Master Password" autocomplete="current-password" autofocus required>
+            <button type="button" id="btn-toggle-unlock-pwd" class="field-btn" title="Toggle Visibility">
+              <svg id="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+          <div id="unlock-error" class="error-banner" style="display: none;"></div>
+          <button type="submit" id="btn-unlock-submit" class="btn-primary">
+            <span>Unlock</span>
+          </button>
+        </form>
+
+        <div class="locked-footer">
+          <span class="security-chip">Zero-Knowledge · Local-Only</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Unlocked View ── -->
+    <div id="unlocked-view" class="view" style="display: none;">
+      <!-- Active Domain Bar -->
+      <div class="site-bar">
+        <span class="site-label">Site:</span>
+        <span id="current-domain" class="site-domain">Checking current tab...</span>
+      </div>
+
+      <!-- Search Input -->
+      <div class="search-wrap">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="search-input" placeholder="Search credentials in vault...">
+        <button id="btn-clear-search" class="field-btn" style="display: none;">&times;</button>
+      </div>
+
+      <!-- Quick Password Generator Drawer (Collapsible) -->
+      <div id="gen-drawer" class="gen-drawer" style="display: none;">
+        <div class="gen-header">
+          <span class="gen-title">Password Generator</span>
+          <button id="btn-close-gen" class="icon-btn-small">&times;</button>
+        </div>
+        <div class="gen-output-wrap">
+          <input type="text" id="gen-output" readonly>
+          <button id="btn-copy-generated" class="btn-small-outline" title="Copy">Copy</button>
+          <button id="btn-regen" class="btn-small-outline" title="Regenerate">&#8635;</button>
+        </div>
+        <div class="gen-controls">
+          <div class="gen-slider-row">
+            <span>Length: <strong id="gen-length-val">16</strong></span>
+            <input type="range" id="gen-length-slider" min="8" max="32" value="16">
+          </div>
+          <div class="gen-options">
+            <label><input type="checkbox" id="gen-chk-upper" checked> A-Z</label>
+            <label><input type="checkbox" id="gen-chk-lower" checked> a-z</label>
+            <label><input type="checkbox" id="gen-chk-digits" checked> 0-9</label>
+            <label><input type="checkbox" id="gen-chk-symbols" checked> !@#</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Credential Drawer (Collapsible) -->
+      <div id="add-drawer" class="gen-drawer" style="display: none;">
+        <div class="gen-header">
+          <span class="gen-title">Add Credential</span>
+          <button id="btn-close-add" class="icon-btn-small">&times;</button>
+        </div>
+        <form id="add-credential-form" style="display: flex; flex-direction: column; gap: 8px;">
+          <input type="text" id="add-title" class="add-input" placeholder="Title (e.g. GitHub)" required>
+          <input type="text" id="add-username" class="add-input" placeholder="Username or Email">
+          <div class="gen-output-wrap">
+            <input type="password" id="add-password" class="add-input" placeholder="Password" required style="flex:1;">
+            <button type="button" id="btn-fill-gen-pwd" class="btn-small-outline" title="Use Generated Password">&#9889;</button>
+          </div>
+          <input type="text" id="add-url" class="add-input" placeholder="Website URL (https://...)">
+          <div style="display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px;">
+            <button type="button" id="btn-cancel-add" class="btn-small-outline">Cancel</button>
+            <button type="submit" id="btn-submit-add-cred" class="btn-primary" style="padding: 6px 14px; font-size: 11px;">Save</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Section Title -->
+      <div class="list-section-header">
+        <span id="list-header-title">Matching Credentials</span>
+        <span id="credential-count" class="count-pill">0</span>
+      </div>
+
+      <!-- Credentials List -->
+      <div id="credentials-list" class="credentials-list">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
