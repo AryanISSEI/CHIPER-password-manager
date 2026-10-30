@@ -479,13 +479,14 @@ class DetailView(QWidget):
 
             try:
                 cat_map_rev = {'login': 0, 'card': 1, 'note': 2, 'identity': 3}
-                idx = cat_map_rev.get(entry.category, 0)
+                category_name = entry.category or 'login'
+                idx = cat_map_rev.get(category_name, 0)
                 self.field_stack.setCurrentIndex(idx)
 
                 title = decrypt_data(entry.encrypted_title, entry.nonce_title, self.vault_key)
-                self.title_lbl.setText(title)
+                self.title_lbl.setText(title or "Untitled")
                 
-                self.domain_lbl.setText(entry.category.title())
+                self.domain_lbl.setText(category_name.title())
 
                 username = ""
                 if entry.encrypted_username:
@@ -607,18 +608,21 @@ class DetailView(QWidget):
         if not self.current_entry_id:
             return
 
-        with Session() as session:
-            entry = session.query(VaultEntry).filter_by(
-                id=self.current_entry_id, user_id=self.user_id
-            ).first()
-            if entry:
-                new_fav = not (getattr(entry, 'is_favorite', False) or False)
-                entry.is_favorite = new_fav
-                session.commit()
-                self._is_favorite = new_fav
-                self.btn_favorite.setText(
-                    "★  Favorited" if new_fav else "☆  Favorite"
-                )
+        try:
+            with Session() as session:
+                entry = session.query(VaultEntry).filter_by(
+                    id=self.current_entry_id, user_id=self.user_id
+                ).first()
+                if entry:
+                    new_fav = not (getattr(entry, 'is_favorite', False) or False)
+                    entry.is_favorite = new_fav
+                    session.commit()
+                    self._is_favorite = new_fav
+                    self.btn_favorite.setText(
+                        "★  Favorited" if new_fav else "☆  Favorite"
+                    )
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to update favorite status: {e}")
 
     def _handle_edit(self):
         if self.current_entry_id:
@@ -636,13 +640,16 @@ class DetailView(QWidget):
         )
 
         if confirm == QMessageBox.StandardButton.Yes:
-            with Session() as session:
-                entry = session.query(VaultEntry).filter_by(
-                    id=self.current_entry_id, user_id=self.user_id
-                ).first()
-                if entry:
-                    session.delete(entry)
-                    session.commit()
+            try:
+                with Session() as session:
+                    entry = session.query(VaultEntry).filter_by(
+                        id=self.current_entry_id, user_id=self.user_id
+                    ).first()
+                    if entry:
+                        session.delete(entry)
+                        session.commit()
 
-            self.current_entry_id = None
-            self.entry_deleted.emit()
+                self.current_entry_id = None
+                self.entry_deleted.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Delete Error", f"Failed to delete credential: {e}")

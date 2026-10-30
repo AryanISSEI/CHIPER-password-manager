@@ -4,18 +4,24 @@
 Supports both create and edit modes via the optional edit_entry_id parameter.
 """
 
+import json
 import secrets
 import string
+import traceback
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTextEdit, QPushButton, QSlider, QCheckBox, QFrame,
     QMessageBox, QComboBox, QProgressBar, QWidget, QStackedWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from models import Session
 from models.vault import VaultEntry
 from services.crypto import encrypt_data, decrypt_data
-from services.password_generator import calculate_password_strength
+from services.password_generator import (
+    calculate_password_strength,
+    generate_passphrase,
+    generate_random_password,
+)
 from services.breach_check import BreachChecker
 from gui.theme import ThemeManager
 
@@ -43,8 +49,11 @@ class AddEntryDialog(QDialog):
 
     def _cleanup(self):
         """Clean up background threads before dialog destruction."""
-        self._breach_debounce.stop()
-        self._breach_checker.cancel()
+        try:
+            self._breach_debounce.stop()
+            self._breach_checker.cancel()
+        except Exception:
+            pass
 
     def accept(self):
         self._cleanup()
@@ -243,10 +252,6 @@ class AddEntryDialog(QDialog):
         self.strength_bar.hide()
         login_layout.addWidget(self.strength_bar)
 
-        self._bar_anim = QPropertyAnimation(self.strength_bar, b"value")
-        self._bar_anim.setDuration(300)
-        self._bar_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
         self.strength_label = QLabel("")
         self.strength_label.setProperty("class", "metadata")
         login_layout.addWidget(self.strength_label)
@@ -409,7 +414,8 @@ class AddEntryDialog(QDialog):
         titles = ["Add Login", "Add Card", "Add Secure Note", "Add Identity"]
         if self.edit_entry_id:
             titles = ["Edit Login", "Edit Card", "Edit Secure Note", "Edit Identity"]
-        self.header.setText(titles[idx])
+        if 0 <= idx < len(titles):
+            self.header.setText(titles[idx])
         
         # Adjust Title Label
         if idx == 0:
@@ -436,45 +442,45 @@ class AddEntryDialog(QDialog):
             self.breach_label.hide()
             return
 
-        result = calculate_password_strength(pwd)
-        label = result['label']
-        score = result['score']
+        try:
+            result = calculate_password_strength(pwd)
+            label = result['label']
+            score = result['score']
 
-        # Map label → strength property for themed QProgressBar colors
-        strength_map = {
-            'Weak': 'weak',
-            'Fair': 'fair',
-            'Good': 'good',
-            'Strong': 'strong',
-            'Very Strong': 'strong',
-        }
-        strength_key = strength_map.get(label, 'weak')
+            # Map label → strength property for themed QProgressBar colors
+            strength_map = {
+                'Weak': 'weak',
+                'Fair': 'fair',
+                'Good': 'good',
+                'Strong': 'strong',
+                'Very Strong': 'strong',
+            }
+            strength_key = strength_map.get(label, 'weak')
 
-        colors = {
-            'Weak': '#E5484D',
-            'Fair': '#E5A63E',
-            'Good': '#2D7FF9',
-            'Strong': '#30A46C',
-            'Very Strong': '#30A46C'
-        }
-        color = colors.get(label, '#5F6570')
+            colors = {
+                'Weak': '#E5484D',
+                'Fair': '#E5A63E',
+                'Good': '#2D7FF9',
+                'Strong': '#30A46C',
+                'Very Strong': '#30A46C'
+            }
+            color = colors.get(label, '#5F6570')
 
-        # Update progress bar with animation
-        self.strength_bar.show()
-        self.strength_bar.setProperty("strength", strength_key)
-        self.strength_bar.style().unpolish(self.strength_bar)
-        self.strength_bar.style().polish(self.strength_bar)
+            # Update progress bar
+            self.strength_bar.show()
+            self.strength_bar.setValue(score)
+            self.strength_bar.setProperty("strength", strength_key)
+            self.strength_bar.style().unpolish(self.strength_bar)
+            self.strength_bar.style().polish(self.strength_bar)
 
-        self._bar_anim.stop()
-        self._bar_anim.setStartValue(self.strength_bar.value())
-        self._bar_anim.setEndValue(score)
-        self._bar_anim.start()
-
-        # Update text label
-        self.strength_label.setText(
-            f"<span style='color: {color}; font-weight: 500;'>{label}</span>"
-            f"<span style='color: #5F6570;'>  ·  {result['entropy']} bits</span>"
-        )
+            # Update text label
+            self.strength_label.setText(
+                f"<span style='color: {color}; font-weight: 500;'>{label}</span>"
+                f"<span style='color: #5F6570;'>  ·  {result['entropy']} bits</span>"
+            )
+        except Exception:
+            # Non-critical — don't crash on strength calculation
+            pass
 
     # ── Breach Detection ────────────────────────────────────────────────
 
@@ -483,46 +489,115 @@ class AddEntryDialog(QDialog):
         if not pwd:
             self.breach_label.hide()
             self._breach_debounce.stop()
-            self._breach_checker.cancel()
+            try:
+                self._breach_checker.cancel()
+            except Exception:
+                pass
             return
         self._breach_debounce.start()
 
     def _trigger_breach_check(self):
         """Fire the actual breach check after debounce expires."""
-        pwd = self.pwd_input.text()
-        if not pwd:
-            return
-        self.breach_label.show()
-        self.breach_label.setText(
-            "<span style='color: #5F6570;'>Checking breach databases…</span>"
-        )
-        self._breach_checker.check(
-            pwd,
-            on_result=self._on_breach_result,
-            on_error=self._on_breach_error,
-        )
+        try:
+            pwd = self.pwd_input.text()
+            if not pwd:
+                return
+            self.breach_label.show()
+            self.breach_label.setText(
+                "<span style='color: #5F6570;'>Checking breach databases…</span>"
+            )
+            self._breach_checker.check(
+                pwd,
+                on_result=self._on_breach_result,
+                on_error=self._on_breach_error,
+            )
+        except Exception:
+            self.breach_label.hide()
 
     def _on_breach_result(self, is_breached: bool, count: int):
         """Handle breach check result."""
-        if is_breached:
-            self.breach_label.setText(
-                f"<span style='color: #E5484D; font-weight: 500;'>"
-                f"⚠ Found in {count:,} data breaches</span>"
-                f"<span style='color: #5F6570;'> — consider a different password</span>"
-            )
-        else:
-            self.breach_label.setText(
-                "<span style='color: #30A46C; font-weight: 500;'>"
-                "✓ Not found in known breaches</span>"
-            )
+        try:
+            if is_breached:
+                self.breach_label.setText(
+                    f"<span style='color: #E5484D; font-weight: 500;'>"
+                    f"⚠ Found in {count:,} data breaches</span>"
+                    f"<span style='color: #5F6570;'> — consider a different password</span>"
+                )
+            else:
+                self.breach_label.setText(
+                    "<span style='color: #30A46C; font-weight: 500;'>"
+                    "✓ Not found in known breaches</span>"
+                )
+        except Exception:
+            pass
 
     def _on_breach_error(self, error_msg: str):
         """Handle breach check network error — non-blocking."""
-        self.breach_label.setText(
-            "<span style='color: #5F6570;'>Could not check breaches (offline?)</span>"
-        )
+        try:
+            self.breach_label.setText(
+                "<span style='color: #5F6570;'>Could not check breaches (offline?)</span>"
+            )
+        except Exception:
+            pass
+
+    def _toggle_password_visibility(self):
+        if self.pwd_input.echoMode() == QLineEdit.EchoMode.Password:
+            self.pwd_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.btn_toggle_pwd.setText("🙈")
+        else:
+            self.pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.btn_toggle_pwd.setText("👁")
+
+    def _toggle_generator(self):
+        if self.gen_frame.isVisible():
+            self.gen_frame.hide()
+        else:
+            self.gen_frame.show()
+
+    def _on_gen_mode_changed(self, idx: int):
+        self.gen_options_stack.setCurrentIndex(idx)
+
+    def _generate_password(self):
+        try:
+            mode = self.mode_combo.currentIndex()
+            if mode == 0:  # Random Password
+                length = self.length_slider.value()
+                upper = self.chk_upper.isChecked()
+                lower = self.chk_lower.isChecked()
+                digits = self.chk_digits.isChecked()
+                symbols = self.chk_symbols.isChecked()
+
+                if not any([upper, lower, digits, symbols]):
+                    self.chk_lower.setChecked(True)
+                    lower = True
+
+                pwd = generate_random_password(
+                    length=length,
+                    upper=upper,
+                    lower=lower,
+                    digits=digits,
+                    symbols=symbols,
+                )
+            else:  # Passphrase
+                count = self.word_count_slider.value()
+                sep_map = {0: "-", 1: "_", 2: ".", 3: " "}
+                sep = sep_map.get(self.sep_combo.currentIndex(), "-")
+                cap = self.chk_capitalize.isChecked()
+
+                pwd = generate_passphrase(
+                    word_count=count,
+                    separator=sep,
+                    capitalize=cap,
+                )
+
+            self.pwd_input.setText(pwd)
+            self.pwd_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.btn_toggle_pwd.setText("🙈")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Password generation failed: {e}")
 
     def _handle_save(self):
+        """Save the vault entry with comprehensive error handling."""
         title = self.title_input.text().strip()
         notes_text = self.notes_input.toPlainText().strip()
 
@@ -554,6 +629,10 @@ class AddEntryDialog(QDialog):
                 "cvv": self.card_cvv_input.text().strip(),
                 "pin": self.card_pin_input.text().strip()
             }
+        elif category == 'note':
+            # Secure notes don't require username/password
+            password = ""
+            username = ""
         elif category == 'identity':
             username = self.id_name_input.text().strip()
             password = self.id_ssn_input.text().strip()
@@ -564,108 +643,174 @@ class AddEntryDialog(QDialog):
             }
         
         extra_data["notes"] = notes_text
-        import json
         notes_json = json.dumps(extra_data)
 
-        enc_title, n_title = encrypt_data(title, self.vault_key)
-        enc_user, n_user = encrypt_data(username, self.vault_key) if username else (None, None)
-        enc_pass, n_pass = encrypt_data(password, self.vault_key) if password else (None, None)
-        enc_url, n_url = encrypt_data(url, self.vault_key) if url else (None, None)
-        enc_notes, n_notes = encrypt_data(notes_json, self.vault_key)
+        # ── Encrypt all fields with error handling ──
+        try:
+            enc_title, n_title = encrypt_data(title, self.vault_key)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Encryption Error",
+                f"Failed to encrypt title: {e}\n\n"
+                "The vault key may be invalid. Try locking and unlocking the vault."
+            )
+            return
 
-        with Session() as session:
-            if self.edit_entry_id:
-                entry = session.query(VaultEntry).filter_by(
-                    id=self.edit_entry_id, user_id=self.user_id
-                ).first()
-                if entry:
-                    entry.encrypted_title = enc_title
-                    entry.nonce_title = n_title
-                    entry.encrypted_username = enc_user
-                    entry.nonce_username = n_user
-                    if enc_pass is None:
-                        enc_pass, n_pass = encrypt_data("", self.vault_key)
-                    entry.encrypted_password = enc_pass
-                    entry.nonce_password = n_pass
-                    entry.encrypted_url = enc_url
-                    entry.nonce_url = n_url
-                    entry.encrypted_notes = enc_notes
-                    entry.nonce_notes = n_notes
-                    entry.category = category
-                    session.commit()
+        try:
+            enc_user, n_user = encrypt_data(username, self.vault_key) if username else (None, None)
+        except Exception as e:
+            QMessageBox.critical(self, "Encryption Error", f"Failed to encrypt username: {e}")
+            return
+
+        try:
+            if password:
+                enc_pass, n_pass = encrypt_data(password, self.vault_key)
             else:
-                if enc_pass is None:
-                    enc_pass, n_pass = encrypt_data("", self.vault_key)
-                entry = VaultEntry(
-                    user_id=self.user_id,
-                    encrypted_title=enc_title, nonce_title=n_title,
-                    encrypted_username=enc_user, nonce_username=n_user,
-                    encrypted_password=enc_pass, nonce_password=n_pass,
-                    encrypted_url=enc_url, nonce_url=n_url,
-                    encrypted_notes=enc_notes, nonce_notes=n_notes,
-                    category=category,
-                )
-                session.add(entry)
-                session.commit()
+                # For Secure Notes and empty passwords, store an empty encrypted value
+                enc_pass, n_pass = encrypt_data("", self.vault_key)
+        except Exception as e:
+            QMessageBox.critical(self, "Encryption Error", f"Failed to encrypt password: {e}")
+            return
+
+        try:
+            enc_url, n_url = encrypt_data(url, self.vault_key) if url else (None, None)
+        except Exception as e:
+            QMessageBox.critical(self, "Encryption Error", f"Failed to encrypt URL: {e}")
+            return
+
+        try:
+            enc_notes, n_notes = encrypt_data(notes_json, self.vault_key)
+        except Exception as e:
+            QMessageBox.critical(self, "Encryption Error", f"Failed to encrypt notes: {e}")
+            return
+
+        # ── Database operation with error handling ──
+        try:
+            with Session() as session:
+                if self.edit_entry_id:
+                    entry = session.query(VaultEntry).filter_by(
+                        id=self.edit_entry_id, user_id=self.user_id
+                    ).first()
+                    if entry:
+                        entry.encrypted_title = enc_title
+                        entry.nonce_title = n_title
+                        entry.encrypted_username = enc_user
+                        entry.nonce_username = n_user
+                        entry.encrypted_password = enc_pass
+                        entry.nonce_password = n_pass
+                        entry.encrypted_url = enc_url
+                        entry.nonce_url = n_url
+                        entry.encrypted_notes = enc_notes
+                        entry.nonce_notes = n_notes
+                        entry.category = category
+                        session.commit()
+                    else:
+                        QMessageBox.warning(
+                            self, "Not Found",
+                            "The entry you're trying to edit no longer exists."
+                        )
+                        return
+                else:
+                    entry = VaultEntry(
+                        user_id=self.user_id,
+                        encrypted_title=enc_title, nonce_title=n_title,
+                        encrypted_username=enc_user, nonce_username=n_user,
+                        encrypted_password=enc_pass, nonce_password=n_pass,
+                        encrypted_url=enc_url, nonce_url=n_url,
+                        encrypted_notes=enc_notes, nonce_notes=n_notes,
+                        category=category,
+                    )
+                    session.add(entry)
+                    session.commit()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Save Error",
+                f"Failed to save credential to database:\n{e}"
+            )
+            traceback.print_exc()
+            return
 
         self.entry_saved.emit()
         self.accept()
 
 
     def _load_entry_data(self):
-        import json
-        with Session() as session:
-            entry = session.query(VaultEntry).filter_by(
-                id=self.edit_entry_id, user_id=self.user_id
-            ).first()
-            if not entry:
-                return
+        """Load existing entry data for editing with full error handling."""
+        try:
+            with Session() as session:
+                entry = session.query(VaultEntry).filter_by(
+                    id=self.edit_entry_id, user_id=self.user_id
+                ).first()
+                if not entry:
+                    return
 
-            cat_map_rev = {'login': 0, 'card': 1, 'note': 2, 'identity': 3}
-            idx = cat_map_rev.get(entry.category, 0)
-            self.cat_combo.setCurrentIndex(idx)
+                cat_map_rev = {'login': 0, 'card': 1, 'note': 2, 'identity': 3}
+                idx = cat_map_rev.get(entry.category or 'login', 0)
+                self.cat_combo.setCurrentIndex(idx)
 
-            title = decrypt_data(entry.encrypted_title, entry.nonce_title, self.vault_key)
-            self.title_input.setText(title)
-
-            username = ""
-            if entry.encrypted_username:
-                username = decrypt_data(entry.encrypted_username, entry.nonce_username, self.vault_key)
-            
-            password = ""
-            if entry.encrypted_password:
-                password = decrypt_data(entry.encrypted_password, entry.nonce_password, self.vault_key)
-                
-            url = ""
-            if entry.encrypted_url:
-                url = decrypt_data(entry.encrypted_url, entry.nonce_url, self.vault_key)
-                
-            notes_json = ""
-            if entry.encrypted_notes:
-                notes_json = decrypt_data(entry.encrypted_notes, entry.nonce_notes, self.vault_key)
-                
-            extra_data = {}
-            if notes_json:
                 try:
-                    extra_data = json.loads(notes_json)
+                    title = decrypt_data(entry.encrypted_title, entry.nonce_title, self.vault_key)
                 except Exception:
-                    extra_data = {"notes": notes_json}
+                    title = ""
+                self.title_input.setText(title)
 
-            self.notes_input.setText(extra_data.get("notes", ""))
+                username = ""
+                if entry.encrypted_username and entry.nonce_username:
+                    try:
+                        username = decrypt_data(entry.encrypted_username, entry.nonce_username, self.vault_key)
+                    except Exception:
+                        username = ""
+                
+                password = ""
+                if entry.encrypted_password and entry.nonce_password:
+                    try:
+                        password = decrypt_data(entry.encrypted_password, entry.nonce_password, self.vault_key)
+                    except Exception:
+                        password = ""
+                    
+                url = ""
+                if entry.encrypted_url and entry.nonce_url:
+                    try:
+                        url = decrypt_data(entry.encrypted_url, entry.nonce_url, self.vault_key)
+                    except Exception:
+                        url = ""
+                    
+                notes_json = ""
+                if entry.encrypted_notes and entry.nonce_notes:
+                    try:
+                        notes_json = decrypt_data(entry.encrypted_notes, entry.nonce_notes, self.vault_key)
+                    except Exception:
+                        notes_json = ""
+                    
+                extra_data = {}
+                if notes_json:
+                    try:
+                        extra_data = json.loads(notes_json)
+                    except Exception:
+                        extra_data = {"notes": notes_json}
 
-            if entry.category == 'login':
-                self.user_input.setText(username)
-                self.pwd_input.setText(password)
-                self.url_input.setText(url)
-            elif entry.category == 'card':
-                self.card_name_input.setText(username)
-                self.card_num_input.setText(password)
-                self.card_exp_input.setText(extra_data.get("exp", ""))
-                self.card_cvv_input.setText(extra_data.get("cvv", ""))
-                self.card_pin_input.setText(extra_data.get("pin", ""))
-            elif entry.category == 'identity':
-                self.id_name_input.setText(username)
-                self.id_ssn_input.setText(password)
-                self.id_email_input.setText(extra_data.get("email", ""))
-                self.id_phone_input.setText(extra_data.get("phone", ""))
-                self.id_addr_input.setText(extra_data.get("address", ""))
+                self.notes_input.setText(extra_data.get("notes", ""))
+
+                category = entry.category or 'login'
+                if category == 'login':
+                    self.user_input.setText(username)
+                    self.pwd_input.setText(password)
+                    self.url_input.setText(url)
+                elif category == 'card':
+                    self.card_name_input.setText(username)
+                    self.card_num_input.setText(password)
+                    self.card_exp_input.setText(extra_data.get("exp", ""))
+                    self.card_cvv_input.setText(extra_data.get("cvv", ""))
+                    self.card_pin_input.setText(extra_data.get("pin", ""))
+                elif category == 'identity':
+                    self.id_name_input.setText(username)
+                    self.id_ssn_input.setText(password)
+                    self.id_email_input.setText(extra_data.get("email", ""))
+                    self.id_phone_input.setText(extra_data.get("phone", ""))
+                    self.id_addr_input.setText(extra_data.get("address", ""))
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Load Error",
+                f"Failed to load entry data: {e}"
+            )
+            traceback.print_exc()

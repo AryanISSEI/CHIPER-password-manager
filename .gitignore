@@ -68,3 +68,6 @@ Thumbs.db
 *.zip
 test_unzip/
 test_gradient.png
+total_source_code.md
+*.dump
+*.log

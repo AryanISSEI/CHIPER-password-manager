@@ -222,47 +222,64 @@ class VaultWidget(QWidget):
         """Loads and decrypts all user credentials."""
         self.entries_data = []
 
-        with Session() as session:
-            entries = (
-                session.query(VaultEntry)
-                .filter_by(user_id=self.user_id)
-                .order_by(VaultEntry.created_at.desc())
-                .all()
-            )
+        try:
+            with Session() as session:
+                entries = (
+                    session.query(VaultEntry)
+                    .filter_by(user_id=self.user_id)
+                    .order_by(VaultEntry.created_at.desc())
+                    .all()
+                )
 
-            for e in entries:
-                try:
-                    title = decrypt_data(e.encrypted_title, e.nonce_title, self.vault_key)
-                    username = (
-                        decrypt_data(e.encrypted_username, e.nonce_username, self.vault_key)
-                        if e.encrypted_username else ""
-                    )
-                    pwd = decrypt_data(e.encrypted_password, e.nonce_password, self.vault_key)
-                    strength = calculate_password_strength(pwd)
+                for e in entries:
+                    try:
+                        if not e.encrypted_title or not e.nonce_title:
+                            continue
+                        title = decrypt_data(e.encrypted_title, e.nonce_title, self.vault_key)
+                        username = ""
+                        if e.encrypted_username and e.nonce_username:
+                            try:
+                                username = decrypt_data(e.encrypted_username, e.nonce_username, self.vault_key)
+                            except Exception:
+                                username = ""
 
-                    # Format last used
-                    last_used_str = ""
-                    if e.last_used_at:
-                        delta = datetime.utcnow() - e.last_used_at
-                        if delta.days > 0:
-                            last_used_str = f"Last used {delta.days}d"
-                        elif delta.seconds >= 3600:
-                            last_used_str = f"Last used {delta.seconds // 3600}h"
-                        else:
-                            last_used_str = f"Last used {max(1, delta.seconds // 60)}m"
+                        pwd = ""
+                        if e.encrypted_password and e.nonce_password:
+                            try:
+                                pwd = decrypt_data(e.encrypted_password, e.nonce_password, self.vault_key)
+                            except Exception:
+                                pwd = ""
 
-                    self.entries_data.append({
-                        'id': e.id,
-                        'title': title,
-                        'username': username,
-                        'strength_score': strength['score'],
-                        'last_used': last_used_str,
-                        'category': getattr(e, 'category', 'login') or 'login',
-                        'is_favorite': getattr(e, 'is_favorite', False) or False,
-                        'last_used_at': e.last_used_at,
-                    })
-                except Exception:
-                    pass
+                        strength = calculate_password_strength(pwd) if pwd else {'score': 0}
+
+                        # Format last used
+                        last_used_str = ""
+                        if e.last_used_at:
+                            try:
+                                delta = datetime.utcnow() - e.last_used_at
+                                if delta.days > 0:
+                                    last_used_str = f"Last used {delta.days}d"
+                                elif delta.seconds >= 3600:
+                                    last_used_str = f"Last used {delta.seconds // 3600}h"
+                                else:
+                                    last_used_str = f"Last used {max(1, delta.seconds // 60)}m"
+                            except Exception:
+                                last_used_str = ""
+
+                        self.entries_data.append({
+                            'id': e.id,
+                            'title': title,
+                            'username': username,
+                            'strength_score': strength.get('score', 0),
+                            'last_used': last_used_str,
+                            'category': getattr(e, 'category', 'login') or 'login',
+                            'is_favorite': getattr(e, 'is_favorite', False) or False,
+                            'last_used_at': e.last_used_at,
+                        })
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         self._render_filtered_list()
 
@@ -412,17 +429,26 @@ class VaultWidget(QWidget):
 
     def _open_add_dialog(self):
         """Open the add credential dialog."""
-        dialog = AddEntryDialog(self.user_id, self.vault_key, self)
-        dialog.entry_saved.connect(self.load_entries)
-        dialog.exec()
+        try:
+            dialog = AddEntryDialog(self.user_id, self.vault_key, self)
+            dialog.entry_saved.connect(self.load_entries)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Add Entry dialog:\n{e}")
 
     def _open_edit_dialog(self, entry_id: int):
         """Open the edit credential dialog."""
-        dialog = AddEntryDialog(self.user_id, self.vault_key, self, edit_entry_id=entry_id)
-        dialog.entry_saved.connect(lambda: self._refresh_after_edit(entry_id))
-        dialog.exec()
+        try:
+            dialog = AddEntryDialog(self.user_id, self.vault_key, self, edit_entry_id=entry_id)
+            dialog.entry_saved.connect(lambda: self._refresh_after_edit(entry_id))
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open Edit Entry dialog:\n{e}")
 
     def _refresh_after_edit(self, entry_id: int):
         """Reload entries and re-open detail view after edit."""
-        self.load_entries()
-        self.detail_view.load_entry(entry_id)
+        try:
+            self.load_entries()
+            self.detail_view.load_entry(entry_id)
+        except Exception as e:
+            print(f"Error refreshing after edit: {e}")

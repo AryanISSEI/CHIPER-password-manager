@@ -44,8 +44,10 @@ from services.crypto import (
 def test_vault(tmp_path, monkeypatch):
     """Create a temporary test database with a user and test credentials."""
     db_path = str(tmp_path / "test_native_host.db")
+    settings_path = str(tmp_path / "settings.json")
     monkeypatch.setattr("config.Config.DATABASE_PATH", db_path)
     monkeypatch.setattr("config.Config.DATABASE_URI", f"sqlite:///{db_path}")
+    monkeypatch.setattr("config.Config.SETTINGS_FILE", settings_path)
 
     # Rebind engine & session
     from sqlalchemy import create_engine

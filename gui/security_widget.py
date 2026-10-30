@@ -21,34 +21,12 @@ from services.breach_check import check_password_breach
 from gui.theme import ThemeManager
 
 
-class BulkBreachCheckWorker(QObject):
-    """Check multiple passwords against HIBP in a background thread."""
+import threading
 
-    finished = pyqtSignal(int)    # compromised_count
-    progress = pyqtSignal(str)    # status text updates
-
-    def __init__(self, passwords: list[str]):
-        super().__init__()
-        self._passwords = passwords
-        self._is_cancelled = False
-
-    def cancel(self):
-        self._is_cancelled = True
-
-    def run(self):
-        compromised = 0
-        total = len(self._passwords)
-        for i, pwd in enumerate(self._passwords, 1):
-            if self._is_cancelled:
-                break
-            self.progress.emit(f"Checking breaches… {i}/{total}")
-            try:
-                is_breached, _ = check_password_breach(pwd)
-                if is_breached:
-                    compromised += 1
-            except Exception:
-                pass  # Network errors are non-fatal for bulk checks
-        self.finished.emit(compromised)
+class BulkBreachSignaler(QObject):
+    """Bridge for bulk breach check progress and completion."""
+    finished = pyqtSignal(int)
+    progress = pyqtSignal(str)
 
 
 class ScoreGauge(QWidget):
@@ -138,8 +116,8 @@ class SecurityWidget(QWidget):
         super().__init__(parent)
         self.user_id = user_id
         self.vault_key = vault_key
-        self._breach_thread: QThread | None = None
-        self._breach_worker: BulkBreachCheckWorker | None = None
+        self._breach_signaler = BulkBreachSignaler()
+        self._breach_req_id = 0
         self._pending_analysis: list = []
         self._pending_total: int = 0
         self._pending_weak: int = 0
@@ -298,27 +276,33 @@ class SecurityWidget(QWidget):
             self._on_breach_check_done(0)
 
     def _start_breach_check(self, passwords: list[str]):
-        """Run bulk breach check in background thread."""
-        # Cancel any existing check gracefully
-        if self._breach_worker:
-            self._breach_worker.cancel()
-        if self._breach_thread and self._breach_thread.isRunning():
-            self._breach_thread.quit()
-            self._breach_thread.wait()
+        """Run bulk breach check in daemon thread without freezing or crashing."""
+        self._breach_req_id += 1
+        req_id = self._breach_req_id
 
-        self._breach_thread = QThread()
-        self._breach_worker = BulkBreachCheckWorker(passwords)
-        self._breach_worker.moveToThread(self._breach_thread)
+        try:
+            self._breach_signaler.finished.disconnect()
+        except Exception:
+            pass
 
-        self._breach_thread.started.connect(self._breach_worker.run)
-        self._breach_worker.finished.connect(self._on_breach_check_done)
-        
-        # Proper memory management: thread and worker delete themselves
-        self._breach_worker.finished.connect(self._breach_thread.quit)
-        self._breach_thread.finished.connect(self._breach_worker.deleteLater)
-        self._breach_thread.finished.connect(self._breach_thread.deleteLater)
+        self._breach_signaler.finished.connect(self._on_breach_check_done)
 
-        self._breach_thread.start()
+        def worker():
+            compromised = 0
+            for pwd in passwords:
+                if self._breach_req_id != req_id:
+                    return
+                try:
+                    is_breached, _ = check_password_breach(pwd)
+                    if is_breached:
+                        compromised += 1
+                except Exception:
+                    pass
+            if self._breach_req_id == req_id:
+                self._breach_signaler.finished.emit(compromised)
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
 
     def _on_breach_check_done(self, compromised_count: int):
         """Update UI after breach check completes."""

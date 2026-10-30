@@ -202,3 +202,42 @@ def generate_passphrase(
         words = [w.capitalize() for w in words]
 
     return separator.join(words)
+
+
+def generate_random_password(
+    length: int = 20,
+    upper: bool = True,
+    lower: bool = True,
+    digits: bool = True,
+    symbols: bool = True,
+) -> str:
+    """Generate a cryptographically secure random password with guaranteed character diversity."""
+    import secrets as _secrets
+    import string as _string
+
+    length = max(8, min(length, 128))
+    chars = ""
+    required = []
+
+    if upper:
+        chars += _string.ascii_uppercase
+        required.append(_secrets.choice(_string.ascii_uppercase))
+    if lower:
+        chars += _string.ascii_lowercase
+        required.append(_secrets.choice(_string.ascii_lowercase))
+    if digits:
+        chars += _string.digits
+        required.append(_secrets.choice(_string.digits))
+    if symbols:
+        syms = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+        chars += syms
+        required.append(_secrets.choice(syms))
+
+    if not chars:
+        chars = _string.ascii_letters + _string.digits
+        required.append(_secrets.choice(_string.ascii_lowercase))
+
+    remaining = max(0, length - len(required))
+    result_chars = required + [_secrets.choice(chars) for _ in range(remaining)]
+    _secrets.SystemRandom().shuffle(result_chars)
+    return "".join(result_chars)

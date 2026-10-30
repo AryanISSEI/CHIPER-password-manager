@@ -48,5 +48,13 @@ def init_db():
     """Create all tables if they don't exist, then run migrations."""
     from models.user import User      # noqa: F401
     from models.vault import VaultEntry  # noqa: F401
-    _migrate_vault_entries()
-    Base.metadata.create_all(engine)
+    try:
+        Base.metadata.create_all(engine)
+        _migrate_vault_entries()
+    except Exception as e:
+        print(f"Database initialization warning: {e}")
+        # Try create_all one more time in case migration interfered
+        try:
+            Base.metadata.create_all(engine)
+        except Exception:
+            pass

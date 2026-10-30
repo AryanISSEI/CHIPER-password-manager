@@ -7,8 +7,9 @@ API docs: https://haveibeenpwned.com/API/v3#SearchingPwnedPasswordsByRange
 """
 
 import hashlib
+import threading
 import requests
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal
 
 
 def check_password_breach(password: str) -> tuple[bool, int]:
@@ -21,6 +22,9 @@ def check_password_breach(password: str) -> tuple[bool, int]:
     Raises:
         requests.RequestException on network errors.
     """
+    if not password:
+        return False, 0
+
     sha1_hash = hashlib.sha1(password.encode('utf-8')).hexdigest().upper()
     prefix = sha1_hash[:5]
     suffix = sha1_hash[5:]
@@ -33,70 +37,61 @@ def check_password_breach(password: str) -> tuple[bool, int]:
     response.raise_for_status()
 
     for line in response.text.splitlines():
-        hash_suffix, count = line.split(":")
-        if hash_suffix.strip() == suffix:
-            return True, int(count.strip())
+        parts = line.split(":")
+        if len(parts) == 2:
+            hash_suffix, count = parts
+            if hash_suffix.strip() == suffix:
+                try:
+                    return True, int(count.strip())
+                except ValueError:
+                    return True, 1
 
     return False, 0
 
 
-class BreachCheckWorker(QObject):
-    """Worker that runs breach check in a background thread."""
-
-    finished = pyqtSignal(bool, int)       # (is_breached, count)
-    error = pyqtSignal(str)                # error message
-
-    def __init__(self, password: str):
-        super().__init__()
-        self._password = password
-        self._is_cancelled = False
-
-    def cancel(self):
-        self._is_cancelled = True
-
-    def run(self):
-        try:
-            is_breached, count = check_password_breach(self._password)
-            if not self._is_cancelled:
-                self.finished.emit(is_breached, count)
-        except Exception as e:
-            if not self._is_cancelled:
-                self.error.emit(str(e))
+class _BreachSignaler(QObject):
+    """Qt signal bridge ensuring callbacks execute safely on the GUI thread."""
+    finished = pyqtSignal(bool, int)
+    error = pyqtSignal(str)
 
 
 class BreachChecker:
-    """Manages async breach checking with thread lifecycle management."""
+    """Crash-proof async breach checker using daemon worker threads and Qt signal dispatch."""
 
     def __init__(self):
-        self._thread: QThread | None = None
-        self._worker: BreachCheckWorker | None = None
+        self._current_req_id = 0
+        self._signaler = _BreachSignaler()
 
-    def check(self, password: str,
-              on_result: callable,
-              on_error: callable):
-        """Start an async breach check, cancelling any pending check."""
+    def check(self, password: str, on_result: callable, on_error: callable):
+        """Start an async breach check. Cancels any pending check without thread stalls."""
         self.cancel()
 
-        self._thread = QThread()
-        self._worker = BreachCheckWorker(password)
-        self._worker.moveToThread(self._thread)
+        self._current_req_id += 1
+        req_id = self._current_req_id
 
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(on_result)
-        self._worker.error.connect(on_error)
+        self._signaler.finished.connect(on_result)
+        self._signaler.error.connect(on_error)
 
-        # Proper memory management: let the thread and worker delete themselves
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.error.connect(self._thread.quit)
-        self._thread.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
+        def worker():
+            try:
+                is_breached, count = check_password_breach(password)
+                if self._current_req_id == req_id:
+                    self._signaler.finished.emit(is_breached, count)
+            except Exception as e:
+                if self._current_req_id == req_id:
+                    self._signaler.error.emit(str(e))
 
-        self._thread.start()
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
 
     def cancel(self):
-        """Cancel any running breach check gracefully."""
-        if self._worker:
-            self._worker.cancel()
-        if self._thread and self._thread.isRunning():
-            self._thread.quit()
-            self._thread.wait()
+        """Invalidate in-flight checks and disconnect listeners immediately."""
+        self._current_req_id += 1
+        try:
+            self._signaler.finished.disconnect()
+        except Exception:
+            pass
+        try:
+            self._signaler.error.disconnect()
+        except Exception:
+            pass

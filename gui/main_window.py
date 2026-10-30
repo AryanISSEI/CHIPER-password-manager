@@ -340,10 +340,13 @@ class MainWindow(QMainWindow):
 
     def changeEvent(self, event):
         """Reload vault entries when the window regains focus so browser-captured credentials appear immediately."""
-        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
-            if hasattr(self, 'vault_widget') and hasattr(self, 'vault_key') and any(self.vault_key):
-                try:
-                    self.vault_widget._load_entries()
-                except Exception:
-                    pass
+        try:
+            if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+                if hasattr(self, 'vault_widget') and hasattr(self, 'vault_key') and any(self.vault_key):
+                    try:
+                        self.vault_widget.load_entries()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         super().changeEvent(event)

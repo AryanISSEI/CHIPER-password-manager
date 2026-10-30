@@ -1,6 +1,7 @@
 """Login and Registration Window for Cipher."""
 
 import time
+import traceback
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFrame, QStackedWidget, QMessageBox,
@@ -229,31 +230,35 @@ class LoginWindow(QWidget):
             self.reg_strength_label.setText("")
             return
 
-        from services.password_generator import calculate_password_strength
-        result = calculate_password_strength(pwd)
-        label = result['label']
-        score = result['score']
+        try:
+            from services.password_generator import calculate_password_strength
+            result = calculate_password_strength(pwd)
+            label = result['label']
+            score = result['score']
 
-        strength_map = {
-            'Weak': 'weak', 'Fair': 'fair', 'Good': 'good',
-            'Strong': 'strong', 'Very Strong': 'strong',
-        }
-        colors = {
-            'Weak': '#E5484D', 'Fair': '#E5A63E', 'Good': '#2D7FF9',
-            'Strong': '#30A46C', 'Very Strong': '#30A46C',
-        }
-        color = colors.get(label, '#5F6570')
+            strength_map = {
+                'Weak': 'weak', 'Fair': 'fair', 'Good': 'good',
+                'Strong': 'strong', 'Very Strong': 'strong',
+            }
+            colors = {
+                'Weak': '#E5484D', 'Fair': '#E5A63E', 'Good': '#2D7FF9',
+                'Strong': '#30A46C', 'Very Strong': '#30A46C',
+            }
+            color = colors.get(label, '#5F6570')
 
-        self.reg_strength_bar.show()
-        self.reg_strength_bar.setValue(score)
-        self.reg_strength_bar.setProperty("strength", strength_map.get(label, 'weak'))
-        self.reg_strength_bar.style().unpolish(self.reg_strength_bar)
-        self.reg_strength_bar.style().polish(self.reg_strength_bar)
+            self.reg_strength_bar.show()
+            self.reg_strength_bar.setValue(score)
+            self.reg_strength_bar.setProperty("strength", strength_map.get(label, 'weak'))
+            self.reg_strength_bar.style().unpolish(self.reg_strength_bar)
+            self.reg_strength_bar.style().polish(self.reg_strength_bar)
 
-        self.reg_strength_label.setText(
-            f"<span style='color: {color}; font-weight: 500;'>{label}</span>"
-            f"<span style='color: #5F6570;'>  ·  {result['entropy']} bits</span>"
-        )
+            self.reg_strength_label.setText(
+                f"<span style='color: {color}; font-weight: 500;'>{label}</span>"
+                f"<span style='color: #5F6570;'>  ·  {result['entropy']} bits</span>"
+            )
+        except Exception:
+            # Non-critical — don't crash on strength calculation
+            pass
 
     def _switch_page(self, index: int):
         self.banner.hide()
@@ -283,41 +288,45 @@ class LoginWindow(QWidget):
             self.show_message(f"Account temporarily locked. Try again in {wait_time}s.", "danger")
             return
 
-        with Session() as session:
-            user = session.query(User).filter_by(username=username).first()
+        try:
+            with Session() as session:
+                user = session.query(User).filter_by(username=username).first()
 
-            if user and verify_password(user.password_hash, password):
-                # Reset rate limiter
-                self.login_attempts.pop(username, None)
+                if user and verify_password(user.password_hash, password):
+                    # Reset rate limiter
+                    self.login_attempts.pop(username, None)
 
-                # Derive KEK and unwrap vault key
-                kek = derive_kek(password, user.kdf_salt)
-                try:
-                    vault_key = unwrap_vault_key(
-                        user.encrypted_vault_key,
-                        user.vault_key_nonce,
-                        kek
-                    )
-                except Exception:
-                    self.show_message("Failed to unlock vault cryptographic key.", "danger")
-                    return
+                    # Derive KEK and unwrap vault key
+                    try:
+                        kek = derive_kek(password, user.kdf_salt)
+                        vault_key = unwrap_vault_key(
+                            user.encrypted_vault_key,
+                            user.vault_key_nonce,
+                            kek
+                        )
+                    except Exception:
+                        self.show_message("Failed to unlock vault cryptographic key.", "danger")
+                        return
 
-                # Clear inputs from memory
-                self.login_pwd_input.clear()
-                self.login_user_input.clear()
+                    # Clear inputs from memory
+                    self.login_pwd_input.clear()
+                    self.login_user_input.clear()
 
-                # Emit success
-                self.authenticated.emit(user.id, user.username, vault_key)
-            else:
-                # Increment failed attempts
-                attempt_data['count'] += 1
-                if attempt_data['count'] >= 5:
-                    backoff = (2 ** (attempt_data['count'] - 5)) * 60
-                    attempt_data['lockout_until'] = current_time + backoff
-                    self.show_message(f"Too many failed attempts. Locked for {int(backoff)}s.", "danger")
+                    # Emit success
+                    self.authenticated.emit(user.id, user.username, vault_key)
                 else:
-                    self.show_message("Invalid username or master password.", "danger")
-                self.login_attempts[username] = attempt_data
+                    # Increment failed attempts
+                    attempt_data['count'] += 1
+                    if attempt_data['count'] >= 5:
+                        backoff = (2 ** (attempt_data['count'] - 5)) * 60
+                        attempt_data['lockout_until'] = current_time + backoff
+                        self.show_message(f"Too many failed attempts. Locked for {int(backoff)}s.", "danger")
+                    else:
+                        self.show_message("Invalid username or master password.", "danger")
+                    self.login_attempts[username] = attempt_data
+        except Exception as e:
+            self.show_message(f"Login error: {e}", "danger")
+            traceback.print_exc()
 
     def _handle_register(self):
         username = self.reg_user_input.text().strip()
@@ -328,6 +337,10 @@ class LoginWindow(QWidget):
             self.show_message("Username and password are required.", "danger")
             return
 
+        if len(username) > 150:
+            self.show_message("Username must be 150 characters or fewer.", "danger")
+            return
+
         if len(password) < 12:
             self.show_message("Master password must be at least 12 characters.", "danger")
             return
@@ -336,33 +349,63 @@ class LoginWindow(QWidget):
             self.show_message("Passwords do not match.", "danger")
             return
 
-        with Session() as session:
-            existing = session.query(User).filter_by(username=username).first()
-            if existing:
-                self.show_message("Username already exists.", "danger")
-                return
+        try:
+            with Session() as session:
+                existing = session.query(User).filter_by(username=username).first()
+                if existing:
+                    self.show_message("Username already exists.", "danger")
+                    return
 
-            # Cryptographic setup
-            password_hash = hash_password(password)
-            auth_salt = generate_salt()
-            kdf_salt = generate_salt()
-            kek = derive_kek(password, kdf_salt)
-            vault_key = generate_vault_key()
-            encrypted_vault_key, vault_key_nonce = wrap_vault_key(vault_key, kek)
+                # Cryptographic setup — each step can fail
+                try:
+                    password_hash = hash_password(password)
+                except Exception as e:
+                    self.show_message(f"Password hashing failed: {e}", "danger")
+                    return
 
-            new_user = User(
-                username=username,
-                password_hash=password_hash,
-                salt=auth_salt,
-                kdf_salt=kdf_salt,
-                encrypted_vault_key=encrypted_vault_key,
-                vault_key_nonce=vault_key_nonce,
-            )
-            session.add(new_user)
-            session.commit()
+                auth_salt = generate_salt()
+                kdf_salt = generate_salt()
+
+                try:
+                    kek = derive_kek(password, kdf_salt)
+                except Exception as e:
+                    self.show_message(f"Key derivation failed: {e}", "danger")
+                    return
+
+                vault_key = generate_vault_key()
+
+                try:
+                    encrypted_vault_key, vault_key_nonce = wrap_vault_key(vault_key, kek)
+                except Exception as e:
+                    self.show_message(f"Key wrapping failed: {e}", "danger")
+                    return
+
+                new_user = User(
+                    username=username,
+                    password_hash=password_hash,
+                    salt=auth_salt,
+                    kdf_salt=kdf_salt,
+                    encrypted_vault_key=encrypted_vault_key,
+                    vault_key_nonce=vault_key_nonce,
+                )
+                session.add(new_user)
+
+                try:
+                    session.commit()
+                except Exception as e:
+                    session.rollback()
+                    self.show_message(f"Failed to save user: {e}", "danger")
+                    return
+
+        except Exception as e:
+            self.show_message(f"Registration failed: {e}", "danger")
+            traceback.print_exc()
+            return
 
         self.reg_pwd_input.clear()
         self.reg_confirm_input.clear()
         self.reg_user_input.clear()
         self._switch_page(0)
-        self.show_message("Vault created successfully. Please unlock.", "success")
+        self.login_user_input.setText(username)
+        self.login_pwd_input.setFocus()
+        self.show_message("Vault created successfully. Please enter your master password to unlock.", "success")
